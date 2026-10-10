@@ -1,0 +1,41 @@
+experiment_name: "i1_balanced_photorealistic"
+hf_repo_id: "your-hf-username/i1-curated-1mp"
+hf_token: null
+
+datasets:
+  - "imagenet22k"
+  - "fluxreason"
+  - "gptedit"
+  - "midjourneyv6"
+  - "pexels"
+  - "rendered_text"
+  - "textatlas"
+
+samples_per_source: 100000
+samples_per_shard: 10000
+min_resolution: 512
+min_buffer_size: 256
+max_synset_count: 35
+max_active_sources: 2
+
+# 1MP training
+max_res_area: [1024, 1024]
+max_dim_limit: 1536
+base_res: [1024, 1024]
+#max_res_area: [768, 512]
+#max_dim_limit: 1024
+#base_res: [512, 512]
+
+min_size: 256
+divisible: 64
+max_log_ar_diff: 0.35
+
+# Token sequence length tiering
+length_tiers: [77, 152, 227]
+tokenizer_name: "Qwen/Qwen3.5-0.8B"
+
+# VAE Latent alignment
+vae_downsample_factor: 8
+
+temp_dir: "temp_shards"
+avif_quality: 80
