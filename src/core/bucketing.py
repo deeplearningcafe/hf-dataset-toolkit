@@ -1,5 +1,8 @@
 import math
 from typing import Any, Dict, List, Optional, Set, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 Resolution = Tuple[int, int]
 
@@ -31,6 +34,10 @@ class OnlineBucketManager:
             self.bucket_resolutions,
             self.log_aspect_ratios,
         ) = self._generate_novelai_buckets()
+        for i in range(len(self.bucket_resolutions)):
+            logger.info(
+                f"Buckets res {self.bucket_resolutions[i]}: sef.log_aspect_ratios[i]"
+            )
 
     def _generate_novelai_buckets(
         self,

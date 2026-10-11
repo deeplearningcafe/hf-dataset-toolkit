@@ -170,11 +170,6 @@ class HFStreamShardEncoder:
                 {
                     "bucket_idx": i,
                     "resolution": list(res),
-                    "latents_resolution": [
-                        res[1] // self.vae_downsample_factor,
-                        res[0] // self.vae_downsample_factor,
-                    ],
-                    "latent_channels": self.in_channels,
                     "log_aspect_ratio": round(math.log(res[0] / max(1, res[1])), 4),
                 }
                 for i, res in enumerate(bucket_resolutions)

@@ -28,6 +28,27 @@ class BaseDatasetAdapter(ABC):
         pass
 
     @staticmethod
+    def _extract_image_payload(
+        raw_sample: Dict[str, Any],
+        preferred_keys: Tuple[str, ...] = (
+            "webp",
+            "image",
+            "jpg",
+            "jpeg",
+            "png",
+            "bytes",
+            "input",
+            "output",
+        ),
+    ) -> Any:
+        """Finds raw image payload across diverse WebDataset/Parquet keys."""
+        for k in preferred_keys:
+            val = raw_sample.get(k)
+            if val is not None:
+                return val
+        return None
+
+    @staticmethod
     def _to_avif_bytes(
         image_input: Any, quality: int = 80
     ) -> Optional[Tuple[bytes, int, int]]:
@@ -75,11 +96,16 @@ class FluxReasonAdapter(BaseDatasetAdapter):
             or raw_sample.get("caption", "")
         )
         sample_id = str(raw_sample.get("id", f"flux_{raw_sample.get('index')}"))
-        category = str(
-            raw_sample.get("task")
-            or raw_sample.get("category")
-            or raw_sample.get("type", "general")
-        )
+        scores = {
+            "composition": raw_sample.get("score_composition", 0),
+            "entity": raw_sample.get("score_entity", 0),
+            "text": raw_sample.get("score_text", 0),
+            "imaginative": raw_sample.get("score_imaginative", 0),
+            "style": raw_sample.get("score_style", 0),
+            "abstract": raw_sample.get("score_abstract", 0),
+            "original": raw_sample.get("score_original", 0),
+        }
+        category = str(max(scores, key=scores.get))
         return img_bytes, str(prompt), sample_id, w, h, category
 
 
@@ -89,7 +115,9 @@ class ImageNet22kWdsAdapter(BaseDatasetAdapter):
     def extract_sample(
         self, raw_sample: Dict[str, Any]
     ) -> Optional[Tuple[bytes, str, str, int, int, str]]:
-        raw_img = raw_sample.get("jpg") or raw_sample.get("png")
+        raw_img = self._extract_image_payload(
+            raw_sample, ("jpg", "jpeg", "png", "webp", "image")
+        )
         res = self._to_avif_bytes(raw_img, quality=self.avif_quality)
         if not res:
             return None
@@ -106,7 +134,14 @@ class ImageNet22kWdsAdapter(BaseDatasetAdapter):
 
         cls_name = meta.get("class_name", "") if isinstance(meta, dict) else ""
         if not cls_name and "cls" in raw_sample:
-            cls_name = str(raw_sample["cls"])
+            cls_val = raw_sample["cls"]
+            if isinstance(cls_val, (bytes, bytearray)):
+                try:
+                    cls_name = cls_val.decode("utf-8").strip()
+                except Exception:
+                    cls_name = str(cls_val)
+            else:
+                cls_name = str(cls_val)
 
         sample_id = str(raw_sample.get("__key__", ""))
         return img_bytes, "", sample_id, w, h, str(cls_name)
@@ -118,8 +153,8 @@ class GPTEditAdapter(BaseDatasetAdapter):
     def extract_sample(
         self, raw_sample: Dict[str, Any]
     ) -> Optional[Tuple[bytes, str, str, int, int, str]]:
-        # if no input use output
-        raw_img = raw_sample.get("input") or raw_sample.get("output")
+        # i1 captions use output
+        raw_img = raw_sample.get("output")  # or raw_sample.get("input")
         res = self._to_avif_bytes(raw_img, quality=self.avif_quality)
         if not res:
             return None
@@ -173,8 +208,8 @@ class PexelsAdapter(BaseDatasetAdapter):
     def extract_sample(
         self, raw_sample: Dict[str, Any]
     ) -> Optional[Tuple[bytes, str, str, int, int, str]]:
-        raw_img = (
-            raw_sample.get("image") or raw_sample.get("jpg") or raw_sample.get("png")
+        raw_img = self._extract_image_payload(
+            raw_sample, ("webp", "image", "jpg", "jpeg", "png")
         )
         res = self._to_avif_bytes(raw_img, quality=self.avif_quality)
         if not res:
@@ -197,7 +232,9 @@ class RenderedTextAdapter(BaseDatasetAdapter):
     def extract_sample(
         self, raw_sample: Dict[str, Any]
     ) -> Optional[Tuple[bytes, str, str, int, int, str]]:
-        raw_img = raw_sample.get("png") or raw_sample.get("image")
+        raw_img = self._extract_image_payload(
+            raw_sample, ("png", "webp", "jpg", "jpeg", "image")
+        )
         res = self._to_avif_bytes(raw_img, quality=self.avif_quality)
         if not res:
             return None
@@ -219,8 +256,8 @@ class MegalithAdapter(BaseDatasetAdapter):
     def extract_sample(
         self, raw_sample: Dict[str, Any]
     ) -> Optional[Tuple[bytes, str, str, int, int, str]]:
-        raw_img = (
-            raw_sample.get("image") or raw_sample.get("bytes") or raw_sample.get("jpg")
+        raw_img = self._extract_image_payload(
+            raw_sample, ("image", "bytes", "jpg", "jpeg", "webp", "png")
         )
         res = self._to_avif_bytes(raw_img, quality=self.avif_quality)
         if not res:
@@ -230,6 +267,9 @@ class MegalithAdapter(BaseDatasetAdapter):
             return None
 
         sample_id = str(
-            raw_sample.get("id") or raw_sample.get("key") or raw_sample.get("url", "")
+            raw_sample.get("id")
+            or raw_sample.get("key")
+            or raw_sample.get("__key__", "")
+            or raw_sample.get("url", "")
         )
         return img_bytes, "", sample_id, w, h, "general"
