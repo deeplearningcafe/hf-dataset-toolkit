@@ -129,6 +129,7 @@ class HFStreamShardEncoder:
             and min(r["original_width"], r["original_height"]) >= 1024
         )
         aes_counts = {
+            1: sum(1 for r in records if r["aesthetic_tier"] == 1),
             2: sum(1 for r in records if r["aesthetic_tier"] == 2),
             3: sum(1 for r in records if r["aesthetic_tier"] == 3),
         }

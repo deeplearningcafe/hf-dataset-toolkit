@@ -36,7 +36,8 @@ class OnlineBucketManager:
         ) = self._generate_novelai_buckets()
         for i in range(len(self.bucket_resolutions)):
             logger.info(
-                f"Buckets res {self.bucket_resolutions[i]}: sef.log_aspect_ratios[i]"
+                f"Bucket res {self.bucket_resolutions[i]}: "
+                f"{self.log_aspect_ratios[i]:.4f}"
             )
 
     def _generate_novelai_buckets(

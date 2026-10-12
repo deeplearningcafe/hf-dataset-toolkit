@@ -444,43 +444,48 @@ class HFDataPipeline:
         """Extracts and formats samples with real-time skip diagnostics."""
         if adapter is None:
             return None
-        res = adapter.extract_sample(item)
-        if res is None:
+
+        # metadata probe without decoding
+        meta = adapter.extract_metadata(item)
+        if meta is None:
             self.skip_counters[ds_name]["extract_or_res"] += 1
             return None
-        img_bytes, _, key, orig_w, orig_h, category = res
+        raw_img, _, key, orig_w, orig_h, category = meta
 
-        # Configurable FLUX category cap (default 40% of samples_per_source)
-        # flux_cap = self.config.get(
-        #     "max_flux_category_count",
-        #     max(1, int(self.samples_per_source * 0.40)),
-        # )
-        # if ds_name == "fluxreason":
-        #     if category != "general" and class_counts[category] >= flux_cap:
-        #         self.skip_counters[ds_name]["category_cap"] += 1
-        #         return None
-        # elif ds_name == "imagenet22k":
-        #     if category and class_counts[category] >= self.max_synset_count:
-        #         self.skip_counters[ds_name]["synset_cap"] += 1
-        #         return None
-
-        if not key or key not in caption_map:
+        if not key:
             self.skip_counters[ds_name]["no_caption"] += 1
             return None
+
+        # Check caption lookup
         captions = caption_map.get(key)
         if not captions:
-            self.skip_counters[ds_name]["empty_caption"] += 1
+            self.skip_counters[ds_name]["no_caption"] += 1
             return None
 
+        # Validate aspect ratio bucket
         bucket_res = self.bucket_manager.assign_bucket(orig_w, orig_h)
         if bucket_res is None:
             self.skip_counters[ds_name]["bucket_mismatch"] += 1
             return None
         bucket_idx, target_w, target_h, aspect_ratio = bucket_res
 
+        res = adapter.encode_image(raw_img)
+        if res is None:
+            self.skip_counters[ds_name]["encode_failed"] += 1
+            return None
+        img_bytes, final_w, final_h = res
+
         tokens = self.tokenizer(captions[0], truncation=True, max_length=256)
         tier = self.encoder.determine_tier(len(tokens["input_ids"]))
         booru_id = f"{ds_name}_{key}"
+
+        min_dim = min(orig_w, orig_h)
+        if min_dim >= 1024:
+            aesthetic_tier = 3
+        elif min_dim >= 512:
+            aesthetic_tier = 2
+        else:
+            aesthetic_tier = 1
 
         record = {
             "booru_id": booru_id,
@@ -493,7 +498,7 @@ class HFDataPipeline:
             "original_height": orig_h,
             "aspect_ratio": aspect_ratio,
             "tier": tier,
-            "aesthetic_tier": 3 if min(orig_w, orig_h) >= 1024 else 2,
+            "aesthetic_tier": aesthetic_tier,
             "tag_weight": 1.0,
         }
         class_counts[category] += 1
@@ -540,6 +545,7 @@ class HFDataPipeline:
                 source,
                 hf_token=self.hf_token,
                 temp_dir=self.config.get("temp_dir", "temp_shards"),
+                max_active_shards=self.config.get("max_active_shards", 3),
             )
             ds, ad = self._get_adapter_and_stream(source)
             if ds is not None and ad is not None:
@@ -582,6 +588,7 @@ class HFDataPipeline:
             c_map = caption_maps[source]
             c_counts = class_counters[source]
 
+            scanned_count = 0
             while (
                 len(buffers[source]) < self.min_buffer_size
                 and extracted_counts[source] < self.samples_per_source
@@ -599,12 +606,22 @@ class HFDataPipeline:
                     stream_exhausted[source] = True
                     break
 
+                scanned_count += 1
                 rec = self._process_single_raw_sample(
                     source, raw_item, adapter, c_map, c_counts
                 )
                 if rec is not None:
                     buffers[source].append(rec)
                     extracted_counts[source] += 1
+
+            if scanned_count > 0 and scanned_count % 5000 == 0:
+                skips = dict(self.skip_counters[source])
+                logger.info(
+                    f"[{source}] Scanned {scanned_count} samples: "
+                    f"buffered={len(buffers[source])}, "
+                    f"extracted={extracted_counts[source]}, "
+                    f"skips={skips}"
+                )
 
         # Populate initial active window
         while len(active_sources) < self.max_active_sources and pending_sources:
